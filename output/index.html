@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股籌碼評分總覽</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family: -apple-system, "Microsoft JhengHei", sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; }
+  .ts { color:#8b949e; font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr)); gap:16px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; }
+  .card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .sid { font-size:18px; font-weight:bold; }
+  .market { font-size:12px; color:#8b949e; border:1px solid #30363d; border-radius:6px; padding:1px 6px; }
+  .score { margin-left:auto; font-weight:bold; color:white; border-radius:8px; padding:2px 10px; }
+  .verdict { font-size:13px; color:#c9d1d9; margin-bottom:2px; }
+  .controller { font-size:12px; color:#8b949e; margin-bottom:8px; }
+  img { width:100%; border-radius:6px; border:1px solid #30363d; }
+  .disclaimer { margin-top:24px; font-size:12px; color:#8b949e; }
+</style>
+</head>
+<body>
+  <h1>台股籌碼 / 基本面加權評分總覽</h1>
+  <div class="ts">更新時間：2026-07-10 05:38（GitHub Actions 自動產生）</div>
+  <div class="grid">
+    
+        <div class="card">
+          <div class="card-head">
+            <span class="sid">3661</span>
+            <span class="market">上市</span>
+            <span class="score" style="background:#BDBDBD">50.5</span>
+          </div>
+          <div class="verdict">中性：多空拉鋸，等訊號明朗</div>
+          <div class="controller">投信控盤（同向率70%、等級相關+0.53）</div>
+          <a href="3661_report.png" target="_blank">
+            <img src="3661_report.png" alt="3661 報告圖" loading="lazy">
+          </a>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="sid">7769</span>
+            <span class="market">上櫃</span>
+            <span class="score" style="background:#BDBDBD">49.9</span>
+          </div>
+          <div class="verdict">中性：多空拉鋸，等訊號明朗</div>
+          <div class="controller">投信控盤（同向率68%、等級相關+0.47）</div>
+          <a href="7769_report.png" target="_blank">
+            <img src="7769_report.png" alt="7769 報告圖" loading="lazy">
+          </a>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="sid">3037</span>
+            <span class="market">上市</span>
+            <span class="score" style="background:#EF9A9A">41.0</span>
+          </div>
+          <div class="verdict">偏空警戒：籌碼鬆動或動能減速中</div>
+          <div class="controller">外資控盤（同向率68%、等級相關+0.71）</div>
+          <a href="3037_report.png" target="_blank">
+            <img src="3037_report.png" alt="3037 報告圖" loading="lazy">
+          </a>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="sid">2360</span>
+            <span class="market">上市</span>
+            <span class="score" style="background:#EF9A9A">38.5</span>
+          </div>
+          <div class="verdict">偏空警戒：籌碼鬆動或動能減速中</div>
+          <div class="controller">投信控盤（同向率66%、等級相關+0.52）</div>
+          <a href="2360_report.png" target="_blank">
+            <img src="2360_report.png" alt="2360 報告圖" loading="lazy">
+          </a>
+        </div>
+  </div>
+  <div class="disclaimer">※ 本頁為公開資料之量化整理，控盤判定為統計推論，不構成投資建議。</div>
+</body>
+</html>
