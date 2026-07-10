@@ -1,0 +1,9 @@
+{
+  "revenue_momentum": 0.25,
+  "foreign_flow": 0.20,
+  "trust_flow": 0.15,
+  "margin_health": 0.10,
+  "short_pressure": 0.10,
+  "technical": 0.10,
+  "liquidity": 0.10
+}
