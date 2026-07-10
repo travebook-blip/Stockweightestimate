@@ -471,7 +471,7 @@
     else verdict = "高風險：多項警訊同時出現";
 
     const result = {
-      stockId: stockData.stockId, market: stockData.market === "twse" ? "上市" : "上櫃",
+      stockId: stockData.stockId, stockName: stockData.stockName || "", market: stockData.market === "twse" ? "上市" : "上櫃",
       total, verdict, controller, scores, notes,
       flowWeights: { 外資: weights.foreign_flow, 投信: weights.trust_flow },
       influence: { 外資: inflF, 投信: inflT },

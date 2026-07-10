@@ -40,6 +40,7 @@
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
   .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .sid { font-size: 18px; font-weight: bold; }
+  .stock-name { font-size: 13px; color: #c9d1d9; }
   .market { font-size: 12px; color: var(--sub); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
   .score-badge { margin-left: auto; font-weight: bold; color: white; border-radius: 8px; padding: 3px 12px; font-size: 15px; }
   .verdict { font-size: 13px; margin-bottom: 2px; }
@@ -255,9 +256,11 @@ async function fetchStockData(stockId, token, proxyPrefix) {
     fmFetch("TaiwanStockInfo", stockId, "2000-01-01", token, proxyPrefix),
   ]);
   let market = "twse";
+  let stockName = "";
   const row = info.find(r => r.stock_id === stockId);
   if (row && row.type) market = String(row.type).toLowerCase();
-  return { stockId, market, price, revenue, institutional, margin, shareholding };
+  if (row && row.stock_name) stockName = row.stock_name;
+  return { stockId, stockName, market, price, revenue, institutional, margin, shareholding };
 }
 
 function scoreColor(total) {
@@ -377,6 +380,7 @@ function renderCard(result) {
   card.innerHTML = `
     <div class="card-head">
       <span class="sid sid-click" title="點擊查看K線技術分析">${result.stockId} 🔍</span>
+      <span class="stock-name">${result.stockName || ""}</span>
       <span class="market">${result.market}</span>
       <span class="score-badge" style="background:${scoreColor(result.total)}">${result.total}</span>
     </div>
@@ -591,7 +595,7 @@ function openTechnicalModal(result) {
     alert("價格資料不足，無法顯示技術分析（至少需要約30個交易日）");
     return;
   }
-  document.getElementById("techModalTitle").textContent = `${result.stockId}（${result.market}）技術分析`;
+  document.getElementById("techModalTitle").textContent = `${result.stockName ? result.stockName + " " : ""}${result.stockId}（${result.market}）技術分析`;
   document.getElementById("techModalOverlay").classList.add("open");
 
   const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));

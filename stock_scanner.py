@@ -95,6 +95,7 @@ class FinMindClient:
 @dataclass
 class StockData:
     stock_id: str
+    stock_name: str = ""                                              # 股票名稱
     market: str = "twse"                                              # twse=上市 / tpex=上櫃
     price: pd.DataFrame = field(default_factory=pd.DataFrame)        # 日K
     revenue: pd.DataFrame = field(default_factory=pd.DataFrame)      # 月營收
@@ -114,6 +115,8 @@ def fetch_stock(client: FinMindClient, stock_id: str) -> StockData:
         row = info[info["stock_id"] == stock_id]
         if not row.empty:
             sd.market = str(row.iloc[0]["type"]).lower()  # 'twse' / 'tpex'
+            if "stock_name" in row.columns:
+                sd.stock_name = str(row.iloc[0]["stock_name"])
     sd.price = client.get("TaiwanStockPrice", stock_id, d150)
     sd.revenue = client.get("TaiwanStockMonthRevenue", stock_id, d3y)
     sd.institutional = client.get("TaiwanStockInstitutionalInvestorsBuySell", stock_id, d150)
@@ -173,7 +176,7 @@ def demo_stock(stock_id: str = "2360", market: str = "twse") -> StockData:
     sh = pd.DataFrame({"date": days.strftime("%Y-%m-%d"),
                        "ForeignInvestmentSharesRatio": np.linspace(59.9, 59.4, 90)})
 
-    sd = StockData(stock_id=stock_id, market=market, price=price, revenue=rev,
+    sd = StockData(stock_id=stock_id, stock_name=f"示範股{stock_id}", market=market, price=price, revenue=rev,
                    institutional=inst, margin=margin, shareholding=sh)
     return sd
 
@@ -518,7 +521,8 @@ def analyze(sd: StockData, weights: dict):
 def plot_report(sd: StockData, result: dict, outdir: str):
     frames = result["frames"]
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle(f"{sd.stock_id}（{result['market']}）分數 {result['total']}/100 — {result['verdict']}\n"
+    name_part = f"{sd.stock_name} " if sd.stock_name else ""
+    fig.suptitle(f"{name_part}{sd.stock_id}（{result['market']}）分數 {result['total']}/100 — {result['verdict']}\n"
                  f"{result['controller']}｜法人權重：外資{result['flow_weights']['外資']:.0%}/投信{result['flow_weights']['投信']:.0%}",
                  fontsize=13, fontweight="bold")
 
@@ -588,7 +592,8 @@ def plot_report(sd: StockData, result: dict, outdir: str):
 
 def print_report(sd: StockData, result: dict):
     print("=" * 62)
-    print(f"  {sd.stock_id}（{result['market']}）  綜合參考分數：{result['total']} / 100")
+    name_part = f"{sd.stock_name} " if sd.stock_name else ""
+    print(f"  {name_part}{sd.stock_id}（{result['market']}）  綜合參考分數：{result['total']} / 100")
     print(f"  判讀：{result['verdict']}")
     print(f"  控盤判定：{result['controller']}")
     fw = result["flow_weights"]
@@ -625,6 +630,7 @@ def generate_index_html(rows: list, outdir: str):
         <div class="card">
           <div class="card-head">
             <span class="sid">{r['stock_id']}</span>
+            <span class="stock-name">{r.get('stock_name','')}</span>
             <span class="market">{r.get('market','')}</span>
             <span class="score" style="background:{color(r['total'])}">{r['total']}</span>
           </div>
@@ -650,6 +656,7 @@ def generate_index_html(rows: list, outdir: str):
   .card {{ background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; }}
   .card-head {{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }}
   .sid {{ font-size:18px; font-weight:bold; }}
+  .stock-name {{ font-size:13px; color:#c9d1d9; }}
   .market {{ font-size:12px; color:#8b949e; border:1px solid #30363d; border-radius:6px; padding:1px 6px; }}
   .score {{ margin-left:auto; font-weight:bold; color:white; border-radius:8px; padding:2px 10px; }}
   .verdict {{ font-size:13px; color:#c9d1d9; margin-bottom:2px; }}
@@ -732,7 +739,7 @@ def main():
         print_report(sd, result)
         path = plot_report(sd, result, args.outdir)
         print(f"  圖表已輸出：{path}\n")
-        row = {"stock_id": sid, "market": result["market"], "total": result["total"],
+        row = {"stock_id": sid, "stock_name": sd.stock_name, "market": result["market"], "total": result["total"],
                "controller": result["controller"], "verdict": result["verdict"],
                "narrative": result.get("narrative", [])}
         row.update({LABELS[k]: round(v, 1) for k, v in result["scores"].items()})
