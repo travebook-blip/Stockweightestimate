@@ -549,6 +549,72 @@ def print_report(sd: StockData, result: dict):
 # ---------------------------------------------------------------------------
 # 主程式
 # ---------------------------------------------------------------------------
+def generate_index_html(rows: list, outdir: str):
+    """產生一頁簡單的總覽網頁，列出所有個股分數與對應圖表，方便 GitHub Pages 直接顯示。"""
+    ts = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
+    rows_sorted = sorted(rows, key=lambda r: r["total"], reverse=True)
+
+    def color(total):
+        if total >= 70: return "#2E7D32"
+        if total >= 55: return "#66BB6A"
+        if total >= 45: return "#BDBDBD"
+        if total >= 30: return "#EF9A9A"
+        return "#C62828"
+
+    cards = []
+    for r in rows_sorted:
+        cards.append(f"""
+        <div class="card">
+          <div class="card-head">
+            <span class="sid">{r['stock_id']}</span>
+            <span class="market">{r.get('market','')}</span>
+            <span class="score" style="background:{color(r['total'])}">{r['total']}</span>
+          </div>
+          <div class="verdict">{r.get('verdict','')}</div>
+          <div class="controller">{r.get('controller','')}</div>
+          <a href="{r['stock_id']}_report.png" target="_blank">
+            <img src="{r['stock_id']}_report.png" alt="{r['stock_id']} 報告圖" loading="lazy">
+          </a>
+        </div>""")
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股籌碼評分總覽</title>
+<style>
+  body {{ background:#0d1117; color:#e6edf3; font-family: -apple-system, "Microsoft JhengHei", sans-serif; margin:0; padding:24px; }}
+  h1 {{ font-size:20px; }}
+  .ts {{ color:#8b949e; font-size:13px; margin-bottom:20px; }}
+  .grid {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr)); gap:16px; }}
+  .card {{ background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; }}
+  .card-head {{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }}
+  .sid {{ font-size:18px; font-weight:bold; }}
+  .market {{ font-size:12px; color:#8b949e; border:1px solid #30363d; border-radius:6px; padding:1px 6px; }}
+  .score {{ margin-left:auto; font-weight:bold; color:white; border-radius:8px; padding:2px 10px; }}
+  .verdict {{ font-size:13px; color:#c9d1d9; margin-bottom:2px; }}
+  .controller {{ font-size:12px; color:#8b949e; margin-bottom:8px; }}
+  img {{ width:100%; border-radius:6px; border:1px solid #30363d; }}
+  .disclaimer {{ margin-top:24px; font-size:12px; color:#8b949e; }}
+</style>
+</head>
+<body>
+  <h1>台股籌碼 / 基本面加權評分總覽</h1>
+  <div class="ts">更新時間：{ts}（GitHub Actions 自動產生）</div>
+  <div class="grid">
+    {''.join(cards)}
+  </div>
+  <div class="disclaimer">※ 本頁為公開資料之量化整理，控盤判定為統計推論，不構成投資建議。</div>
+</body>
+</html>"""
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, "index.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return path
+
+
 def load_list(path: str):
     if path.lower().endswith(".csv"):
         df = pd.read_csv(path, dtype=str)
@@ -561,7 +627,7 @@ def load_list(path: str):
 def main():
     ap = argparse.ArgumentParser(description="台股籌碼/基本面加權評分工具")
     ap.add_argument("stock", nargs="?", help="個股代號，如 2360")
-    ap.add_argument("--list", help="匯入清單檔（CSV 或 TXT，每列一個代號）")
+    ap.add_argument("--list", help="匯入清單檔（CSV 或 TXT，每列一個代號）；未指定且無 stock 時，預設讀取 watchlist.txt")
     ap.add_argument("--weights", help="自訂權重 JSON 檔")
     ap.add_argument("--token", default="", help="FinMind API token（可選）")
     ap.add_argument("--outdir", default="output", help="輸出資料夾")
@@ -576,11 +642,17 @@ def main():
             weights.update(json.load(f))
 
     if args.demo:
-        targets = [args.stock or "2360"]
+        if args.list:
+            targets = load_list(args.list)
+        else:
+            targets = [args.stock or "2360"]
     elif args.list:
         targets = load_list(args.list)
     elif args.stock:
         targets = [args.stock]
+    elif os.path.exists("watchlist.txt"):
+        print("[i] 未指定股票，讀取預設 watchlist.txt")
+        targets = load_list("watchlist.txt")
     else:
         ap.print_help(); sys.exit(1)
 
@@ -601,14 +673,17 @@ def main():
         if not args.demo and len(targets) > 1:
             time.sleep(1.5)  # 禮貌性間隔，避免撞流量限制
 
-    if len(rows) > 1:
+    if rows:
         summary = pd.DataFrame(rows).sort_values("total", ascending=False)
         os.makedirs(args.outdir, exist_ok=True)
         sp = os.path.join(args.outdir, "summary.csv")
         summary.to_csv(sp, index=False, encoding="utf-8-sig")
-        print("\n===== 清單總表（依分數排序）=====")
-        print(summary.to_string(index=False))
+        if len(rows) > 1:
+            print("\n===== 清單總表（依分數排序）=====")
+            print(summary.to_string(index=False))
         print(f"\n總表已輸出：{sp}")
+        idx_path = generate_index_html(rows, args.outdir)
+        print(f"總覽網頁已輸出：{idx_path}")
 
     print("\n※ 本工具輸出僅為公開資料之量化整理，不構成投資建議。")
 
