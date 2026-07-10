@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股籌碼 / 基本面加權評分（即時版）</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --sub: #8b949e;
+    --accent: #4C78A8; --accent2: #72B7B2; --red: #E45756; --green: #2E7D32;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); margin: 0; padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "PingFang TC", sans-serif;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--sub); font-size: 13px; margin-bottom: 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; color: var(--sub); margin-bottom: 6px; }
+  input[type=text], input[type=password], textarea {
+    width: 100%; background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 8px 10px; font-size: 14px; font-family: inherit;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .row > div { flex: 1; min-width: 220px; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: var(--accent); color: white; border: none; border-radius: 6px;
+    padding: 9px 18px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  button.secondary { background: #21262d; border: 1px solid var(--border); }
+  button:hover { opacity: 0.88; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hint { font-size: 12px; color: var(--sub); margin-top: 4px; }
+  .status { font-size: 13px; color: var(--sub); margin-left: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sid { font-size: 18px; font-weight: bold; }
+  .market { font-size: 12px; color: var(--sub); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+  .score-badge { margin-left: auto; font-weight: bold; color: white; border-radius: 8px; padding: 3px 12px; font-size: 15px; }
+  .verdict { font-size: 13px; margin-bottom: 2px; }
+  .controller { font-size: 12px; color: var(--sub); margin-bottom: 10px; }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .chart-box { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+  .chart-box canvas { max-height: 180px; }
+  .chart-box h4 { font-size: 11px; color: var(--sub); margin: 2px 4px 4px; font-weight: normal; }
+  details.dims { margin-top: 10px; font-size: 12px; }
+  details.dims summary { cursor: pointer; color: var(--sub); }
+  .dim-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .dim-row .note { color: var(--sub); flex: 1; text-align: right; margin-left: 10px; }
+  .error-card { border-color: var(--red); }
+  .error-msg { color: #ff8a80; font-size: 13px; }
+  .disclaimer { margin-top: 24px; font-size: 12px; color: var(--sub); }
+  a.link { color: var(--accent2); }
+</style>
+</head>
+<body>
+  <h1>台股籌碼 / 基本面加權評分（即時版）</h1>
+  <div class="subtitle">在瀏覽器直接輸入或匯入股票代號，即時向 FinMind 抓資料並計算——不需要等排程、不需要進 GitHub Actions。</div>
+
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label>FinMind API Token（可選，免費註冊可取得，未填則用免費額度 300次/小時）</label>
+        <input type="password" id="tokenInput" placeholder="貼上你的 FinMind token">
+        <div class="hint">Token 只存在你自己瀏覽器（localStorage），不會送到任何第三方。</div>
+      </div>
+      <div>
+        <label>CORS 代理前綴（選填；若直連失敗才需要，例如 https://corsproxy.io/?）</label>
+        <input type="text" id="proxyInput" placeholder="留空先嘗試直連">
+        <div class="hint">直連失敗時會自動提示你填這欄再重試一次。</div>
+      </div>
+    </div>
+
+    <label>股票代號（逗號或換行分隔，可混合）</label>
+    <textarea id="codesInput" placeholder="例如：2360, 3037, 7769, 3661"></textarea>
+    <div class="row" style="margin-top:8px;">
+      <div>
+        <label>或匯入 CSV / TXT 檔（每行一個代號，或含 stock_id 欄位）</label>
+        <input type="file" id="fileInput" accept=".csv,.txt">
+      </div>
+    </div>
+
+    <div class="btns" style="margin-top:10px;">
+      <button id="analyzeBtn">開始分析</button>
+      <button class="secondary" id="clearBtn">清除</button>
+      <button class="secondary" id="copyBtn">複製清單</button>
+      <span class="status" id="statusText"></span>
+    </div>
+  </div>
+
+  <div class="grid" id="resultsGrid"></div>
+
+  <div class="disclaimer">※ 本頁所有分析皆在你的瀏覽器本機計算，資料來源為 FinMind 公開 API。分數與控盤判定為統計整理，不構成投資建議。</div>
+
+<script>
+/* ============ analyzer.js 內嵌開始（評分引擎，與 stock_scanner.py 邏輯對應） ============ */
+</script>
+<script src="analyzer.js"></script>
+<script>
+/* ============ 網頁互動邏輯 ============ */
+const LS_TOKEN = "stockapp_token", LS_PROXY = "stockapp_proxy", LS_CODES = "stockapp_codes";
+const tokenInput = document.getElementById("tokenInput");
+const proxyInput = document.getElementById("proxyInput");
+const codesInput = document.getElementById("codesInput");
+const fileInput = document.getElementById("fileInput");
+const analyzeBtn = document.getElementById("analyzeBtn");
+const clearBtn = document.getElementById("clearBtn");
+const copyBtn = document.getElementById("copyBtn");
+const statusText = document.getElementById("statusText");
+const resultsGrid = document.getElementById("resultsGrid");
+
+// 還原上次輸入
+try {
+  tokenInput.value = localStorage.getItem(LS_TOKEN) || "";
+  proxyInput.value = localStorage.getItem(LS_PROXY) || "";
+  codesInput.value = localStorage.getItem(LS_CODES) || "";
+} catch (e) { /* localStorage 不可用時忽略 */ }
+
+function saveState() {
+  try {
+    localStorage.setItem(LS_TOKEN, tokenInput.value);
+    localStorage.setItem(LS_PROXY, proxyInput.value);
+    localStorage.setItem(LS_CODES, codesInput.value);
+  } catch (e) {}
+}
+
+function parseCodes(text) {
+  return [...new Set(text.split(/[,\n\r，、\s]+/).map(s => s.trim()).filter(Boolean))];
+}
+
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result);
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let codes;
+    if (lines[0] && /stock_id/i.test(lines[0])) {
+      // 有 header 的 CSV：找出 stock_id 欄位位置
+      const header = lines[0].split(",").map(h => h.trim().toLowerCase());
+      const idx = header.indexOf("stock_id");
+      codes = lines.slice(1).map(l => l.split(",")[idx >= 0 ? idx : 0].trim()).filter(Boolean);
+    } else {
+      codes = lines.map(l => l.split(",")[0].trim()).filter(Boolean);
+    }
+    const merged = new Set(parseCodes(codesInput.value));
+    codes.forEach(c => merged.add(c));
+    codesInput.value = [...merged].join(", ");
+    saveState();
+  };
+  reader.readAsText(f, "utf-8");
+});
+
+clearBtn.addEventListener("click", () => {
+  codesInput.value = "";
+  resultsGrid.innerHTML = "";
+  statusText.textContent = "";
+  saveState();
+});
+
+copyBtn.addEventListener("click", async () => {
+  const codes = parseCodes(codesInput.value);
+  const text = codes.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    statusText.textContent = "已複製到剪貼簿";
+  } catch (e) {
+    // 後備方案：跳出可選取文字方塊
+    prompt("複製下面的清單：", text);
+  }
+});
+
+const FM_URL = "https://api.finmindtrade.com/api/v4/data";
+
+function dateNDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+async function fmFetch(dataset, stockId, startDate, token, proxyPrefix) {
+  const params = new URLSearchParams({ dataset, data_id: stockId, start_date: startDate });
+  if (token) params.set("token", token);
+  const directUrl = `${FM_URL}?${params.toString()}`;
+  const finalUrl = proxyPrefix ? proxyPrefix + encodeURIComponent(directUrl) : directUrl;
+  const res = await fetch(finalUrl);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.status && json.status === 402) throw new Error("API 流量限制，請稍後再試或填入 token");
+  return json.data || [];
+}
+
+async function fetchStockData(stockId, token, proxyPrefix) {
+  const d150 = dateNDaysAgo(150);
+  const d3y = dateNDaysAgo(1100);
+  const [price, revenue, institutional, margin, shareholding, info] = await Promise.all([
+    fmFetch("TaiwanStockPrice", stockId, d150, token, proxyPrefix),
+    fmFetch("TaiwanStockMonthRevenue", stockId, d3y, token, proxyPrefix),
+    fmFetch("TaiwanStockInstitutionalInvestorsBuySell", stockId, d150, token, proxyPrefix),
+    fmFetch("TaiwanStockMarginPurchaseShortSale", stockId, d150, token, proxyPrefix),
+    fmFetch("TaiwanStockShareholding", stockId, d150, token, proxyPrefix),
+    fmFetch("TaiwanStockInfo", stockId, "2000-01-01", token, proxyPrefix),
+  ]);
+  let market = "twse";
+  const row = info.find(r => r.stock_id === stockId);
+  if (row && row.type) market = String(row.type).toLowerCase();
+  return { stockId, market, price, revenue, institutional, margin, shareholding };
+}
+
+function scoreColor(total) {
+  if (total >= 70) return "#2E7D32";
+  if (total >= 55) return "#66BB6A";
+  if (total >= 45) return "#757575";
+  if (total >= 30) return "#EF9A9A";
+  return "#C62828";
+}
+
+function buildRevenueChart(canvas, series) {
+  if (!series || !series.length) return;
+  const s = series.slice(-18);
+  new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: s.map(r => r.date.slice(2, 7)),
+      datasets: [
+        { type: "bar", label: "月營收(億)", data: s.map(r => r.revenue / 1e8), backgroundColor: "#4C78A899", yAxisID: "y" },
+        { type: "line", label: "YoY %", data: s.map(r => r.yoy), borderColor: "#E45756", yAxisID: "y1", tension: 0.2, pointRadius: 2 },
+      ],
+    },
+    options: {
+      responsive: true, animation: false,
+      scales: {
+        y: { position: "left", ticks: { color: "#8b949e", font: { size: 9 } } },
+        y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { color: "#8b949e", font: { size: 9 } } },
+        x: { ticks: { color: "#8b949e", font: { size: 8 } } },
+      },
+      plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 9 } } } },
+    },
+  });
+}
+
+function cumulative(net, dates) {
+  let acc = 0;
+  return dates.map(d => { acc += (net.get(d) || 0); return acc; });
+}
+
+function buildPriceInstChart(canvas, priceRows, foreignNet, trustNet) {
+  if (!priceRows || !priceRows.length) return;
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const dates = p.map(r => r.date);
+  const close = p.map(r => Number(r.close));
+  const fCum = cumulative(foreignNet, dates);
+  const tCum = cumulative(trustNet, dates);
+  new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: dates.map(d => d.slice(5)),
+      datasets: [
+        { label: "收盤價", data: close, borderColor: "#e6edf3", yAxisID: "y", pointRadius: 0, borderWidth: 1.5 },
+        { label: "外資累計(張)", data: fCum, borderColor: "#4C78A8", yAxisID: "y1", pointRadius: 0 },
+        { label: "投信累計(張)", data: tCum, borderColor: "#72B7B2", yAxisID: "y1", pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, animation: false,
+      scales: {
+        y: { position: "left", ticks: { color: "#8b949e", font: { size: 9 } } },
+        y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { color: "#8b949e", font: { size: 9 } } },
+        x: { ticks: { color: "#8b949e", font: { size: 8 }, maxTicksLimit: 8 } },
+      },
+      plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 9 } } } },
+    },
+  });
+}
+
+function buildMarginChart(canvas, marginRows, priceRows) {
+  if (!marginRows || !marginRows.length) return;
+  const m = [...marginRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const p = [...(priceRows || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const priceMap = new Map(p.map(r => [r.date, Number(r.close)]));
+  new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: m.map(r => r.date.slice(5)),
+      datasets: [
+        { label: "融資餘額(張)", data: m.map(r => Number(r.MarginPurchaseTodayBalance) / 1000), borderColor: "#E45756", yAxisID: "y", pointRadius: 0 },
+        { label: "收盤價", data: m.map(r => priceMap.get(r.date) ?? null), borderColor: "#e6edf3", yAxisID: "y1", pointRadius: 0, borderWidth: 1 },
+      ],
+    },
+    options: {
+      responsive: true, animation: false,
+      scales: {
+        y: { position: "left", ticks: { color: "#8b949e", font: { size: 9 } } },
+        y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { color: "#8b949e", font: { size: 9 } } },
+        x: { ticks: { color: "#8b949e", font: { size: 8 }, maxTicksLimit: 8 } },
+      },
+      plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 9 } } } },
+    },
+  });
+}
+
+function buildRadarChart(canvas, scores) {
+  const labels = Object.keys(Analyzer.LABELS).map(k => Analyzer.LABELS[k]);
+  const values = Object.keys(Analyzer.LABELS).map(k => scores[k]);
+  new Chart(canvas, {
+    type: "radar",
+    data: { labels, datasets: [{ data: values, backgroundColor: "#4C78A855", borderColor: "#4C78A8" }] },
+    options: {
+      responsive: true, animation: false,
+      scales: { r: { min: 0, max: 100, ticks: { display: false }, pointLabels: { color: "#c9d1d9", font: { size: 9 } }, grid: { color: "#30363d" }, angleLines: { color: "#30363d" } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+function renderCard(result) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const dimsHtml = Object.keys(Analyzer.LABELS).map(k => `
+    <div class="dim-row"><span>${Analyzer.LABELS[k]}　${result.scores[k].toFixed(1)}分</span><span class="note">${result.notes[k]}</span></div>
+  `).join("");
+
+  card.innerHTML = `
+    <div class="card-head">
+      <span class="sid">${result.stockId}</span>
+      <span class="market">${result.market}</span>
+      <span class="score-badge" style="background:${scoreColor(result.total)}">${result.total}</span>
+    </div>
+    <div class="verdict">${result.verdict}</div>
+    <div class="controller">${result.controller}｜法人權重 外資${(result.flowWeights.外資 * 100).toFixed(0)}% / 投信${(result.flowWeights.投信 * 100).toFixed(0)}%</div>
+    <div class="chart-grid">
+      <div class="chart-box"><h4>營收動能（柱=營收/線=YoY）</h4><canvas id="c-rev-${result.stockId}"></canvas></div>
+      <div class="chart-box"><h4>股價 vs 法人累計買賣超</h4><canvas id="c-price-${result.stockId}"></canvas></div>
+      <div class="chart-box"><h4>融資餘額 vs 股價</h4><canvas id="c-margin-${result.stockId}"></canvas></div>
+      <div class="chart-box"><h4>七大構面分數</h4><canvas id="c-radar-${result.stockId}"></canvas></div>
+    </div>
+    <details class="dims"><summary>各構面詳細數據</summary>${dimsHtml}</details>
+  `;
+  resultsGrid.appendChild(card);
+
+  buildRevenueChart(document.getElementById(`c-rev-${result.stockId}`), result.series.revenue);
+  buildPriceInstChart(document.getElementById(`c-price-${result.stockId}`), result.series.price, result.series.foreignNet, result.series.trustNet);
+  buildMarginChart(document.getElementById(`c-margin-${result.stockId}`), result.series.margin, result.series.price);
+  buildRadarChart(document.getElementById(`c-radar-${result.stockId}`), result.scores);
+}
+
+function renderErrorCard(stockId, message, canRetryWithProxy) {
+  const card = document.createElement("div");
+  card.className = "card error-card";
+  card.innerHTML = `
+    <div class="card-head"><span class="sid">${stockId}</span></div>
+    <div class="error-msg">抓取失敗：${message}</div>
+    ${canRetryWithProxy ? '<div class="hint">可能是瀏覽器 CORS 限制，請在上方「CORS 代理前綴」欄位填入代理網址後，重新按「開始分析」。</div>' : ""}
+  `;
+  resultsGrid.appendChild(card);
+}
+
+analyzeBtn.addEventListener("click", async () => {
+  saveState();
+  const codes = parseCodes(codesInput.value);
+  if (!codes.length) { statusText.textContent = "請先輸入或匯入股票代號"; return; }
+  resultsGrid.innerHTML = "";
+  analyzeBtn.disabled = true;
+  const token = tokenInput.value.trim();
+  const proxy = proxyInput.value.trim();
+
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    statusText.textContent = `分析中 (${i + 1}/${codes.length})：${code}`;
+    try {
+      const data = await fetchStockData(code, token, proxy);
+      if (!data.price || !data.price.length) {
+        renderErrorCard(code, "查無價格資料（代號錯誤或近期無交易）", false);
+        continue;
+      }
+      const result = Analyzer.analyze(data, {});
+      renderCard(result);
+    } catch (e) {
+      renderErrorCard(code, e.message || String(e), !proxy);
+    }
+    // 禮貌性間隔，避免觸發 FinMind 流量限制
+    if (i < codes.length - 1) await new Promise(r => setTimeout(r, 400));
+  }
+  statusText.textContent = `完成：共 ${codes.length} 檔`;
+  analyzeBtn.disabled = false;
+});
+
+[tokenInput, proxyInput, codesInput].forEach(el => el.addEventListener("change", saveState));
+</script>
+</body>
+</html>
