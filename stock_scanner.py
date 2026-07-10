@@ -394,6 +394,54 @@ def score_liquidity(price: pd.DataFrame, inst: pd.DataFrame):
 
 
 # ---------------------------------------------------------------------------
+# 文字解讀：誰控盤、外資投信同買/對作、EMA21位置、月線扣抵
+# ---------------------------------------------------------------------------
+def ema_status(price: pd.DataFrame, period: int = 21):
+    if price.empty or len(price) < period:
+        return None, f"資料不足計算EMA{period}"
+    p = price.copy()
+    p["date"] = pd.to_datetime(p["date"])
+    p = p.sort_values("date")
+    ema_series = p["close"].ewm(span=period, adjust=False).mean()
+    now = p["close"].iloc[-1]
+    ema_now = ema_series.iloc[-1]
+    above = now > ema_now
+    diff_pct = (now / ema_now - 1) * 100
+    note = (f"股價{now:.1f}站上EMA{period}({ema_now:.1f})，高出{diff_pct:.1f}%，短線偏多" if above
+            else f"股價{now:.1f}跌破EMA{period}({ema_now:.1f})，低了{abs(diff_pct):.1f}%，短線偏空")
+    return above, note
+
+
+def monthly_deduction(price: pd.DataFrame, period: int = 20):
+    if price.empty or len(price) <= period:
+        return None, "資料不足判斷月線扣抵"
+    p = price.copy()
+    p["date"] = pd.to_datetime(p["date"])
+    p = p.sort_values("date").reset_index(drop=True)
+    now = p["close"].iloc[-1]
+    deduct_value = p["close"].iloc[-1 - period]
+    favorable = now > deduct_value
+    diff_pct = (now / deduct_value - 1) * 100
+    note = (f"月線扣抵值{deduct_value:.1f}偏低（現價高出{diff_pct:.1f}%），扣抵後有利月線續揚" if favorable
+            else f"月線扣抵值{deduct_value:.1f}偏高（現價低了{abs(diff_pct):.1f}%），扣抵後月線恐走平或彎頭向下")
+    return favorable, note
+
+
+def chip_narrative(net_f: pd.Series, net_t: pd.Series, controller_text: str, window: int = 5):
+    recent_f = net_f.tail(window).sum() if not net_f.empty else 0
+    recent_t = net_t.tail(window).sum() if not net_t.empty else 0
+    f_dir = "買超" if recent_f > 0 else ("賣超" if recent_f < 0 else "持平")
+    t_dir = "買超" if recent_t > 0 else ("賣超" if recent_t < 0 else "持平")
+    if recent_f == 0 and recent_t == 0:
+        relation = "外資與投信近期買賣皆平淡，無明顯動作"
+    elif np.sign(recent_f) == np.sign(recent_t) and recent_f != 0:
+        relation = f"外資與投信近{window}日同步{f_dir}，方向一致，力道疊加"
+    else:
+        relation = f"外資近{window}日{f_dir}、投信{t_dir}，兩者對作（方向不一致），需觀察誰的影響力較大來判斷實際走勢"
+    return f"{controller_text}。{relation}"
+
+
+# ---------------------------------------------------------------------------
 # 綜合評分 + 繪圖
 # ---------------------------------------------------------------------------
 LABELS = {
@@ -452,9 +500,15 @@ def analyze(sd: StockData, weights: dict):
     else:
         verdict = "高風險：多項警訊同時出現"
 
+    narrative = [chip_narrative(net_f_all, net_t_all, controller)]
+    _, ema_note = ema_status(sd.price, 21)
+    narrative.append(ema_note)
+    _, md_note = monthly_deduction(sd.price, 20)
+    narrative.append(md_note)
+
     return {"total": total, "verdict": verdict, "scores": scores, "notes": notes,
             "market": "上市" if sd.market == "twse" else "上櫃",
-            "controller": controller,
+            "controller": controller, "narrative": narrative,
             "flow_weights": {"外資": weights["foreign_flow"], "投信": weights["trust_flow"]},
             "influence": {"外資": infl_f, "投信": infl_t},
             "frames": {"revenue": rev_df, "foreign": for_net, "trust": tru_net,
@@ -541,6 +595,9 @@ def print_report(sd: StockData, result: dict):
     print(f"  動態法人權重：外資 {fw['外資']:.1%}／投信 {fw['投信']:.1%}"
           f"（先驗依{result['market']}＋近60日實測影響力各半）")
     print("-" * 62)
+    for line in result.get("narrative", []):
+        print(f"  📌 {line}")
+    print("-" * 62)
     for k in LABELS:
         print(f"  {LABELS[k]:<6}{result['scores'][k]:6.1f} 分  {result['notes'][k]}")
     print("=" * 62)
@@ -563,6 +620,7 @@ def generate_index_html(rows: list, outdir: str):
 
     cards = []
     for r in rows_sorted:
+        narrative_html = "".join(f'<div class="narrative-line">{line}</div>' for line in r.get("narrative", []))
         cards.append(f"""
         <div class="card">
           <div class="card-head">
@@ -572,6 +630,7 @@ def generate_index_html(rows: list, outdir: str):
           </div>
           <div class="verdict">{r.get('verdict','')}</div>
           <div class="controller">{r.get('controller','')}</div>
+          <div class="narrative-box">{narrative_html}</div>
           <a href="{r['stock_id']}_report.png" target="_blank">
             <img src="{r['stock_id']}_report.png" alt="{r['stock_id']} 報告圖" loading="lazy">
           </a>
@@ -595,6 +654,8 @@ def generate_index_html(rows: list, outdir: str):
   .score {{ margin-left:auto; font-weight:bold; color:white; border-radius:8px; padding:2px 10px; }}
   .verdict {{ font-size:13px; color:#c9d1d9; margin-bottom:2px; }}
   .controller {{ font-size:12px; color:#8b949e; margin-bottom:8px; }}
+  .narrative-box {{ background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:6px 8px; margin-bottom:8px; }}
+  .narrative-line {{ font-size:11px; color:#c9d1d9; padding:2px 0; }}
   img {{ width:100%; border-radius:6px; border:1px solid #30363d; }}
   .disclaimer {{ margin-top:24px; font-size:12px; color:#8b949e; }}
 </style>
@@ -627,6 +688,7 @@ def load_list(path: str):
 def main():
     ap = argparse.ArgumentParser(description="台股籌碼/基本面加權評分工具")
     ap.add_argument("stock", nargs="?", help="個股代號，如 2360")
+    ap.add_argument("--codes", help="多檔代號，逗號分隔，例如 '2360,3037,7769'（優先於 --list/watchlist）")
     ap.add_argument("--list", help="匯入清單檔（CSV 或 TXT，每列一個代號）；未指定且無 stock 時，預設讀取 watchlist.txt")
     ap.add_argument("--weights", help="自訂權重 JSON 檔")
     ap.add_argument("--token", default="", help="FinMind API token（可選）")
@@ -642,10 +704,14 @@ def main():
             weights.update(json.load(f))
 
     if args.demo:
-        if args.list:
+        if args.codes:
+            targets = [c.strip() for c in args.codes.split(",") if c.strip()]
+        elif args.list:
             targets = load_list(args.list)
         else:
             targets = [args.stock or "2360"]
+    elif args.codes:
+        targets = [c.strip() for c in args.codes.split(",") if c.strip()]
     elif args.list:
         targets = load_list(args.list)
     elif args.stock:
@@ -667,20 +733,26 @@ def main():
         path = plot_report(sd, result, args.outdir)
         print(f"  圖表已輸出：{path}\n")
         row = {"stock_id": sid, "market": result["market"], "total": result["total"],
-               "controller": result["controller"], "verdict": result["verdict"]}
+               "controller": result["controller"], "verdict": result["verdict"],
+               "narrative": result.get("narrative", [])}
         row.update({LABELS[k]: round(v, 1) for k, v in result["scores"].items()})
         rows.append(row)
         if not args.demo and len(targets) > 1:
             time.sleep(1.5)  # 禮貌性間隔，避免撞流量限制
 
     if rows:
-        summary = pd.DataFrame(rows).sort_values("total", ascending=False)
+        csv_rows = []
+        for r in rows:
+            r2 = dict(r)
+            r2["narrative"] = " ／ ".join(r2.get("narrative", []))
+            csv_rows.append(r2)
+        summary = pd.DataFrame(csv_rows).sort_values("total", ascending=False)
         os.makedirs(args.outdir, exist_ok=True)
         sp = os.path.join(args.outdir, "summary.csv")
         summary.to_csv(sp, index=False, encoding="utf-8-sig")
         if len(rows) > 1:
             print("\n===== 清單總表（依分數排序）=====")
-            print(summary.to_string(index=False))
+            print(summary.drop(columns=["narrative"]).to_string(index=False))
         print(f"\n總表已輸出：{sp}")
         idx_path = generate_index_html(rows, args.outdir)
         print(f"總覽網頁已輸出：{idx_path}")

@@ -267,6 +267,139 @@
   }
 
   // ---------------------------------------------------------------
+  // 技術指標：EMA / KDJ / MACD / OBV / 月線扣抵
+  // priceRows 需含 date, close，KDJ另需 max(高) / min(低)
+  // ---------------------------------------------------------------
+  function ema(values, period) {
+    const k = 2 / (period + 1);
+    const out = new Array(values.length).fill(null);
+    let prev = null;
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] == null) continue;
+      if (prev === null) { prev = values[i]; out[i] = prev; continue; }
+      prev = values[i] * k + prev * (1 - k);
+      out[i] = prev;
+    }
+    return out;
+  }
+
+  function smaSeries(values, period) {
+    const out = new Array(values.length).fill(null);
+    let sum = 0;
+    for (let i = 0; i < values.length; i++) {
+      sum += values[i];
+      if (i >= period) sum -= values[i - period];
+      if (i >= period - 1) out[i] = sum / period;
+    }
+    return out;
+  }
+
+  function kdj(priceRows, period = 9) {
+    const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const close = p.map(r => Number(r.close));
+    const high = p.map(r => Number(r.max != null ? r.max : r.close));
+    const low = p.map(r => Number(r.min != null ? r.min : r.close));
+    const K = [], D = [], J = [];
+    let prevK = 50, prevD = 50;
+    for (let i = 0; i < close.length; i++) {
+      const start = Math.max(0, i - period + 1);
+      const hh = Math.max(...high.slice(start, i + 1));
+      const ll = Math.min(...low.slice(start, i + 1));
+      const rsv = hh === ll ? 50 : ((close[i] - ll) / (hh - ll)) * 100;
+      const k = (prevK * 2 + rsv) / 3;
+      const d = (prevD * 2 + k) / 3;
+      const j = 3 * k - 2 * d;
+      K.push(k); D.push(d); J.push(j);
+      prevK = k; prevD = d;
+    }
+    return { dates: p.map(r => r.date), K, D, J };
+  }
+
+  function macd(priceRows, fast = 12, slow = 26, signal = 9) {
+    const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const close = p.map(r => Number(r.close));
+    const emaFast = ema(close, fast);
+    const emaSlow = ema(close, slow);
+    const dif = close.map((_, i) => (emaFast[i] != null && emaSlow[i] != null) ? emaFast[i] - emaSlow[i] : null);
+    const validDif = dif.map(v => v == null ? 0 : v);
+    const deaRaw = ema(validDif, signal);
+    const dea = dif.map((v, i) => v == null ? null : deaRaw[i]);
+    const hist = dif.map((v, i) => (v == null || dea[i] == null) ? null : v - dea[i]);
+    return { dates: p.map(r => r.date), dif, dea, hist };
+  }
+
+  function obv(priceRows, maPeriod = 30) {
+    const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const close = p.map(r => Number(r.close));
+    const vol = p.map(r => Number(r.Trading_Volume || 0));
+    const out = [0];
+    for (let i = 1; i < close.length; i++) {
+      if (close[i] > close[i - 1]) out.push(out[i - 1] + vol[i]);
+      else if (close[i] < close[i - 1]) out.push(out[i - 1] - vol[i]);
+      else out.push(out[i - 1]);
+    }
+    const ma = smaSeries(out, maPeriod);
+    return { dates: p.map(r => r.date), obv: out, ma };
+  }
+
+  // 月線扣抵：比較目前收盤價與「n個交易日前」即將被扣掉的舊值，判斷月線未來易漲或易跌
+  function monthlyDeduction(priceRows, period = 20) {
+    const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (p.length <= period) return { favorable: null, note: "資料不足判斷月線扣抵" };
+    const close = p.map(r => Number(r.close));
+    const now = close[close.length - 1];
+    const deductValue = close[close.length - 1 - period];
+    const favorable = now > deductValue;
+    const diffPct = ((now - deductValue) / deductValue) * 100;
+    const note = favorable
+      ? `月線扣抵值${deductValue.toFixed(1)}偏低（現價高出${diffPct.toFixed(1)}%），扣抵後有利月線續揚`
+      : `月線扣抵值${deductValue.toFixed(1)}偏高（現價低了${Math.abs(diffPct).toFixed(1)}%），扣抵後月線恐走平或彎頭向下`;
+    return { favorable, deductValue, diffPct, note };
+  }
+
+  function emaStatus(priceRows, period = 21) {
+    const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const close = p.map(r => Number(r.close));
+    const emaSeries = ema(close, period);
+    const now = close[close.length - 1];
+    const emaNow = emaSeries[emaSeries.length - 1];
+    if (emaNow == null) return { above: null, note: `資料不足計算EMA${period}` };
+    const above = now > emaNow;
+    const diffPct = ((now - emaNow) / emaNow) * 100;
+    const note = above
+      ? `股價${now.toFixed(1)}站上EMA${period}(${emaNow.toFixed(1)})，高出${diffPct.toFixed(1)}%，短線偏多`
+      : `股價${now.toFixed(1)}跌破EMA${period}(${emaNow.toFixed(1)})，低了${Math.abs(diffPct).toFixed(1)}%，短線偏空`;
+    return { above, emaNow, diffPct, note };
+  }
+
+  // ---------------------------------------------------------------
+  // 籌碼文字解讀：控盤者 + 外資投信是同買同賣還是對作
+  // ---------------------------------------------------------------
+  function chipNarrative(netF, netT, controllerText, window = 5) {
+    const datesF = [...netF.keys()].sort();
+    const datesT = [...netT.keys()].sort();
+    const recentF = datesF.slice(-window).reduce((s, d) => s + netF.get(d), 0);
+    const recentT = datesT.slice(-window).reduce((s, d) => s + netT.get(d), 0);
+    const fDir = recentF > 0 ? "買超" : recentF < 0 ? "賣超" : "持平";
+    const tDir = recentT > 0 ? "買超" : recentT < 0 ? "賣超" : "持平";
+    let relation;
+    if (recentF === 0 && recentT === 0) relation = "外資與投信近期買賣皆平淡，無明顯動作";
+    else if (Math.sign(recentF) === Math.sign(recentT) && recentF !== 0) relation = `外資與投信近${window}日同步${fDir}，方向一致，力道疊加`;
+    else relation = `外資近${window}日${fDir}、投信${tDir}，兩者對作（方向不一致），需觀察誰的影響力較大來判斷實際走勢`;
+    return `${controllerText}。${relation}`;
+  }
+
+  function buildNarrative(result, priceRows) {
+    const lines = [];
+    lines.push(chipNarrative(result.series.foreignNet, result.series.trustNet, result.controller));
+    const ema21 = emaStatus(priceRows, 21);
+    if (ema21.note) lines.push(ema21.note);
+    const md = monthlyDeduction(priceRows, 20);
+    if (md.note) lines.push(md.note);
+    return lines;
+  }
+
+  // ---------------------------------------------------------------
   // 動態法人權重：上市/上櫃先驗 + 實測影響力 各半
   // ---------------------------------------------------------------
   function dynamicFlowWeights(market, inflF, inflT, base) {
@@ -337,22 +470,26 @@
     else if (total >= 30) verdict = "偏空警戒：籌碼鬆動或動能減速中";
     else verdict = "高風險：多項警訊同時出現";
 
-    return {
+    const result = {
       stockId: stockData.stockId, market: stockData.market === "twse" ? "上市" : "上櫃",
       total, verdict, controller, scores, notes,
       flowWeights: { 外資: weights.foreign_flow, 投信: weights.trust_flow },
       influence: { 外資: inflF, 投信: inflT },
       series: { revenue: rev.series, price: stockData.price, foreignNet: netFAll, trustNet: netTAll, margin: stockData.margin },
     };
+    result.narrative = buildNarrative(result, stockData.price || []);
+    return result;
   }
 
   return {
     DEFAULT_WEIGHTS, LABELS, analyze,
+    technical: { ema, smaSeries, kdj, macd, obv, monthlyDeduction, emaStatus },
     // 個別函式也匯出，方便單元測試
     _internal: {
       dailyReturns, instNet, influenceMetrics, stanceScore, revenueScore,
       foreignScore, trustScore, marginScore, shortScore, technicalScore,
       liquidityScore, dynamicFlowWeights, spearman, clip, round,
+      ema, kdj, macd, obv, monthlyDeduction, emaStatus, chipNarrative, buildNarrative,
     },
   };
 });

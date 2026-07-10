@@ -56,6 +56,29 @@
   .error-msg { color: #ff8a80; font-size: 13px; }
   .disclaimer { margin-top: 24px; font-size: 12px; color: var(--sub); }
   a.link { color: var(--accent2); }
+  .sid-click { cursor: pointer; text-decoration: underline dotted; }
+  .sid-click:hover { color: var(--accent2); }
+  .narrative-box { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
+  .narrative-line { font-size: 12px; color: #c9d1d9; padding: 2px 0; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none;
+    align-items: flex-start; justify-content: center; z-index: 1000; padding: 30px 16px; overflow-y: auto;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; width: 100%; max-width: 900px;
+  }
+  .modal-head { display: flex; align-items: center; margin-bottom: 12px; }
+  .modal-head h2 { font-size: 18px; margin: 0; }
+  .modal-close { margin-left: auto; background: #21262d; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .tech-chart-box { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+  .tech-chart-box h4 { font-size: 12px; color: var(--sub); margin: 0 0 4px 4px; font-weight: normal; }
+  #candleCanvas { width: 100%; height: 260px; display: block; }
+  .ema-legend { display: flex; gap: 14px; font-size: 11px; color: var(--sub); margin: 4px 0 8px 4px; flex-wrap: wrap; }
+  .ema-legend span { display: flex; align-items: center; gap: 4px; }
+  .ema-dot { width: 10px; height: 3px; display: inline-block; }
 </style>
 </head>
 <body>
@@ -96,6 +119,29 @@
   <div class="grid" id="resultsGrid"></div>
 
   <div class="disclaimer">※ 本頁所有分析皆在你的瀏覽器本機計算，資料來源為 FinMind 公開 API。分數與控盤判定為統計整理，不構成投資建議。</div>
+
+  <div class="modal-overlay" id="techModalOverlay">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="techModalTitle">技術分析</h2>
+        <button class="modal-close" id="techModalClose">關閉 ✕</button>
+      </div>
+      <div class="tech-chart-box">
+        <h4>K線 + EMA7 / EMA11 / EMA21 / EMA55</h4>
+        <div class="ema-legend">
+          <span><i class="ema-dot" style="background:#f2c14e"></i>EMA7</span>
+          <span><i class="ema-dot" style="background:#e45756"></i>EMA11</span>
+          <span><i class="ema-dot" style="background:#4C78A8"></i>EMA21</span>
+          <span><i class="ema-dot" style="background:#72B7B2"></i>EMA55</span>
+        </div>
+        <canvas id="candleCanvas"></canvas>
+      </div>
+      <div class="tech-chart-box"><h4>成交量</h4><canvas id="techVolCanvas" style="max-height:100px;"></canvas></div>
+      <div class="tech-chart-box"><h4>KDJ (9,3,3)</h4><canvas id="techKdjCanvas" style="max-height:120px;"></canvas></div>
+      <div class="tech-chart-box"><h4>MACD (12,26,9)</h4><canvas id="techMacdCanvas" style="max-height:120px;"></canvas></div>
+      <div class="tech-chart-box"><h4>OBV + 30MA</h4><canvas id="techObvCanvas" style="max-height:120px;"></canvas></div>
+    </div>
+  </div>
 
 <script>
 /* ============ analyzer.js 內嵌開始（評分引擎，與 stock_scanner.py 邏輯對應） ============ */
@@ -197,10 +243,11 @@ async function fmFetch(dataset, stockId, startDate, token, proxyPrefix) {
 }
 
 async function fetchStockData(stockId, token, proxyPrefix) {
+  const dPrice = dateNDaysAgo(300); // 拉長天數，確保EMA55/月線扣抵有足夠交易日
   const d150 = dateNDaysAgo(150);
   const d3y = dateNDaysAgo(1100);
   const [price, revenue, institutional, margin, shareholding, info] = await Promise.all([
-    fmFetch("TaiwanStockPrice", stockId, d150, token, proxyPrefix),
+    fmFetch("TaiwanStockPrice", stockId, dPrice, token, proxyPrefix),
     fmFetch("TaiwanStockMonthRevenue", stockId, d3y, token, proxyPrefix),
     fmFetch("TaiwanStockInstitutionalInvestorsBuySell", stockId, d150, token, proxyPrefix),
     fmFetch("TaiwanStockMarginPurchaseShortSale", stockId, d150, token, proxyPrefix),
@@ -325,15 +372,17 @@ function renderCard(result) {
   const dimsHtml = Object.keys(Analyzer.LABELS).map(k => `
     <div class="dim-row"><span>${Analyzer.LABELS[k]}　${result.scores[k].toFixed(1)}分</span><span class="note">${result.notes[k]}</span></div>
   `).join("");
+  const narrativeHtml = (result.narrative || []).map(t => `<div class="narrative-line">${t}</div>`).join("");
 
   card.innerHTML = `
     <div class="card-head">
-      <span class="sid">${result.stockId}</span>
+      <span class="sid sid-click" title="點擊查看K線技術分析">${result.stockId} 🔍</span>
       <span class="market">${result.market}</span>
       <span class="score-badge" style="background:${scoreColor(result.total)}">${result.total}</span>
     </div>
     <div class="verdict">${result.verdict}</div>
     <div class="controller">${result.controller}｜法人權重 外資${(result.flowWeights.外資 * 100).toFixed(0)}% / 投信${(result.flowWeights.投信 * 100).toFixed(0)}%</div>
+    <div class="narrative-box">${narrativeHtml}</div>
     <div class="chart-grid">
       <div class="chart-box"><h4>營收動能（柱=營收/線=YoY）</h4><canvas id="c-rev-${result.stockId}"></canvas></div>
       <div class="chart-box"><h4>股價 vs 法人累計買賣超</h4><canvas id="c-price-${result.stockId}"></canvas></div>
@@ -348,6 +397,8 @@ function renderCard(result) {
   buildPriceInstChart(document.getElementById(`c-price-${result.stockId}`), result.series.price, result.series.foreignNet, result.series.trustNet);
   buildMarginChart(document.getElementById(`c-margin-${result.stockId}`), result.series.margin, result.series.price);
   buildRadarChart(document.getElementById(`c-radar-${result.stockId}`), result.scores);
+
+  card.querySelector(".sid-click").addEventListener("click", () => openTechnicalModal(result));
 }
 
 function renderErrorCard(stockId, message, canRetryWithProxy) {
@@ -359,6 +410,208 @@ function renderErrorCard(stockId, message, canRetryWithProxy) {
     ${canRetryWithProxy ? '<div class="hint">可能是瀏覽器 CORS 限制，請在上方「CORS 代理前綴」欄位填入代理網址後，重新按「開始分析」。</div>' : ""}
   `;
   resultsGrid.appendChild(card);
+}
+
+/* ============ 技術分析 Modal：K線 + EMA + 成交量 + KDJ + MACD + OBV ============ */
+let techCharts = []; // 追蹤目前開啟的 Chart.js 實例，關閉時銷毀避免記憶體累積
+
+function closeTechModal() {
+  document.getElementById("techModalOverlay").classList.remove("open");
+  techCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  techCharts = [];
+}
+document.getElementById("techModalClose").addEventListener("click", closeTechModal);
+document.getElementById("techModalOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "techModalOverlay") closeTechModal();
+});
+
+function drawCandlestick(canvas, priceRows, emaLines) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 800;
+  const cssHeight = 260;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.height = cssHeight + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-90); // 只畫最近90根K棒，避免太擠
+  if (!p.length) return;
+  const padL = 44, padR = 10, padT = 10, padB = 20;
+  const plotW = cssWidth - padL - padR;
+  const plotH = cssHeight - padT - padB;
+
+  const allVals = p.flatMap(r => [Number(r.max ?? r.close), Number(r.min ?? r.close)]);
+  emaLines.forEach(line => { line.values.slice(-p.length).forEach(v => { if (v != null) allVals.push(v); }); });
+  const maxV = Math.max(...allVals), minV = Math.min(...allVals);
+  const yOf = v => padT + plotH * (1 - (v - minV) / (maxV - minV || 1));
+  const n = p.length;
+  const slotW = plotW / n;
+  const candleW = Math.max(1.5, slotW * 0.6);
+  const xOf = i => padL + slotW * i + slotW / 2;
+
+  // 座標軸刻度（左側價格）
+  ctx.strokeStyle = "#30363d"; ctx.fillStyle = "#8b949e"; ctx.font = "9px sans-serif"; ctx.lineWidth = 1;
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t++) {
+    const v = minV + (maxV - minV) * (t / ticks);
+    const y = yOf(v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(cssWidth - padR, y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), 2, y + 3);
+  }
+
+  // K棒
+  for (let i = 0; i < n; i++) {
+    const r = p[i];
+    const open = Number(r.open ?? r.close), close = Number(r.close);
+    const high = Number(r.max ?? Math.max(open, close));
+    const low = Number(r.min ?? Math.min(open, close));
+    const up = close >= open;
+    const color = up ? "#E45756" : "#2E7D32"; // 台股慣例：紅漲綠跌
+    const x = xOf(i);
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(x, yOf(high)); ctx.lineTo(x, yOf(low)); ctx.stroke();
+    const bodyTop = yOf(Math.max(open, close));
+    const bodyH = Math.max(1, Math.abs(yOf(open) - yOf(close)));
+    ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+  }
+
+  // EMA 線
+  emaLines.forEach(line => {
+    const vals = line.values.slice(-n);
+    ctx.strokeStyle = line.color; ctx.lineWidth = 1.3; ctx.beginPath();
+    let started = false;
+    vals.forEach((v, i) => {
+      if (v == null) return;
+      const x = xOf(i), y = yOf(v);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // X軸日期標籤（頭尾與中間各一）
+  ctx.fillStyle = "#8b949e";
+  [0, Math.floor(n / 2), n - 1].forEach(i => {
+    ctx.fillText(p[i].date.slice(5), xOf(i) - 12, cssHeight - 4);
+  });
+}
+
+function chartDefaults(labels) {
+  return {
+    responsive: true, animation: false,
+    scales: {
+      x: { ticks: { color: "#8b949e", font: { size: 8 }, maxTicksLimit: 8 } },
+      y: { ticks: { color: "#8b949e", font: { size: 9 } } },
+    },
+    plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 9 } } } },
+  };
+}
+
+function buildTechVolumeChart(canvas, priceRows) {
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-90);
+  const c = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: p.map(r => r.date.slice(5)),
+      datasets: [{
+        label: "成交量(張)", data: p.map(r => Number(r.Trading_Volume || 0) / 1000),
+        backgroundColor: p.map((r, i) => {
+          const prevClose = i > 0 ? Number(p[i - 1].close) : Number(r.close);
+          return Number(r.close) >= prevClose ? "#E4575699" : "#2E7D3299";
+        }),
+      }],
+    },
+    options: chartDefaults(),
+  });
+  techCharts.push(c);
+}
+
+function buildTechKdjChart(canvas, priceRows) {
+  const { K, D, J } = Analyzer.technical.kdj(priceRows, 9);
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const n = Math.min(90, p.length);
+  const dates = p.slice(-n).map(r => r.date.slice(5));
+  const c = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [
+        { label: "K", data: K.slice(-n), borderColor: "#4C78A8", pointRadius: 0, borderWidth: 1.3 },
+        { label: "D", data: D.slice(-n), borderColor: "#E45756", pointRadius: 0, borderWidth: 1.3 },
+        { label: "J", data: J.slice(-n), borderColor: "#72B7B2", pointRadius: 0, borderWidth: 1.3 },
+      ],
+    },
+    options: chartDefaults(),
+  });
+  techCharts.push(c);
+}
+
+function buildTechMacdChart(canvas, priceRows) {
+  const { dif, dea, hist } = Analyzer.technical.macd(priceRows, 12, 26, 9);
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const n = Math.min(90, p.length);
+  const dates = p.slice(-n).map(r => r.date.slice(5));
+  const c = new Chart(canvas, {
+    data: {
+      labels: dates,
+      datasets: [
+        { type: "bar", label: "柱狀(DIF-DEA)", data: hist.slice(-n), backgroundColor: hist.slice(-n).map(v => (v == null ? "#8b949e" : v >= 0 ? "#E4575699" : "#2E7D3299")) },
+        { type: "line", label: "DIF", data: dif.slice(-n), borderColor: "#4C78A8", pointRadius: 0, borderWidth: 1.3 },
+        { type: "line", label: "DEA", data: dea.slice(-n), borderColor: "#f2c14e", pointRadius: 0, borderWidth: 1.3 },
+      ],
+    },
+    options: chartDefaults(),
+  });
+  techCharts.push(c);
+}
+
+function buildTechObvChart(canvas, priceRows) {
+  const { obv, ma } = Analyzer.technical.obv(priceRows, 30);
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const n = Math.min(90, p.length);
+  const dates = p.slice(-n).map(r => r.date.slice(5));
+  const c = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [
+        { label: "OBV", data: obv.slice(-n), borderColor: "#4C78A8", pointRadius: 0, borderWidth: 1.3 },
+        { label: "OBV 30MA", data: ma.slice(-n), borderColor: "#E45756", pointRadius: 0, borderWidth: 1.3 },
+      ],
+    },
+    options: chartDefaults(),
+  });
+  techCharts.push(c);
+}
+
+function openTechnicalModal(result) {
+  const priceRows = result.series.price;
+  if (!priceRows || priceRows.length < 30) {
+    alert("價格資料不足，無法顯示技術分析（至少需要約30個交易日）");
+    return;
+  }
+  document.getElementById("techModalTitle").textContent = `${result.stockId}（${result.market}）技術分析`;
+  document.getElementById("techModalOverlay").classList.add("open");
+
+  const p = [...priceRows].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const close = p.map(r => Number(r.close));
+  const emaLines = [
+    { period: 7, color: "#f2c14e" },
+    { period: 11, color: "#e45756" },
+    { period: 21, color: "#4C78A8" },
+    { period: 55, color: "#72B7B2" },
+  ].map(l => ({ ...l, values: Analyzer.technical.ema(close, l.period) }));
+
+  // 延遲一個 frame 讓 modal 版面 (display:flex) 先生效，canvas 寬度才量得到
+  requestAnimationFrame(() => {
+    try { drawCandlestick(document.getElementById("candleCanvas"), priceRows, emaLines); }
+    catch (e) { console.error("K線繪製失敗：", e); }
+    buildTechVolumeChart(document.getElementById("techVolCanvas"), priceRows);
+    buildTechKdjChart(document.getElementById("techKdjCanvas"), priceRows);
+    buildTechMacdChart(document.getElementById("techMacdCanvas"), priceRows);
+    buildTechObvChart(document.getElementById("techObvCanvas"), priceRows);
+  });
 }
 
 analyzeBtn.addEventListener("click", async () => {
